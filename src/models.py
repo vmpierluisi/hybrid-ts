@@ -65,6 +65,59 @@ class Classic_TCN(nn.Module):
         
         return predictions, targets
 
+    def predict(self, x, steps=1):
+        """
+        Multi-step ahead prediction using the Classic TCN model.
+        
+        Args:
+            x: Input sequence tensor of shape (seq_len,) or (batch_size, seq_len) or (batch_size, seq_len, 1)
+            steps: Number of steps to predict ahead
+        
+        Returns:
+            predictions: Tensor of shape (steps,) for single sequence or (batch_size, steps) for batch
+        
+        The model recursively predicts:
+            $\hat{y}_{t+h} = \text{TCN}(y_{t-k:t+h-1})$
+        """
+        self.eval()
+        with torch.no_grad():
+            # Normalize input dimensions
+            if x.dim() == 1:
+                x = x.unsqueeze(0).unsqueeze(2)
+                single_sequence = True
+            elif x.dim() == 2:
+                x = x.unsqueeze(2)
+                single_sequence = False
+            else:
+                single_sequence = False
+            
+            batch_size = x.shape[0]
+            
+            # Initialize sequence with input
+            sequence = x.clone()
+            predictions = []
+            
+            for step in range(steps):
+                # TCN prediction on entire sequence so far
+                x_transposed = sequence.transpose(1, 2)
+                tcn_output = self.tcn(x_transposed)
+                
+                # Take the last prediction
+                next_pred = tcn_output[:, :, -1:].transpose(1, 2)  # Shape: (batch_size, 1, 1)
+                
+                predictions.append(next_pred)
+                
+                # Append prediction to sequence for next iteration
+                sequence = torch.cat([sequence, next_pred], dim=1)
+            
+            # Stack predictions
+            predictions = torch.cat(predictions, dim=1)
+            
+            if single_sequence:
+                return predictions.squeeze()
+            else:
+                return predictions.squeeze(2)
+
 
 #Flexible AR and TCN Additive Hybrid Model
 class AdditiveHybrid_AR_TCN(nn.Module):
@@ -152,6 +205,90 @@ class AdditiveHybrid_AR_TCN(nn.Module):
         final_predictions = ar_predictions + tcn_predictions
 
         return final_predictions, targets
+
+    def predict(self, x, steps=1):
+        """
+        Multi-step ahead prediction using the additive hybrid model.
+        
+        Args:
+            x: Input sequence tensor of shape (seq_len,) or (batch_size, seq_len) or (batch_size, seq_len, 1)
+            steps: Number of steps to predict ahead
+        
+        Returns:
+            predictions: Tensor of shape (steps,) for single sequence or (batch_size, steps) for batch
+        
+        The model recursively predicts:
+            $\hat{y}_{t+h} = \hat{L}_{t+h} + \hat{N}_{t+h}$
+        
+        where:
+            $\hat{L}_{t+h} = \sum_{i=1}^{p} \phi_i y_{t+h-i} + c$
+            $\hat{N}_{t+h} = \text{TCN}(e_{t+h-k:t+h-1})$
+        """
+        self.eval()
+        with torch.no_grad():
+            # Normalize input dimensions
+            if x.dim() == 1:
+                x = x.unsqueeze(0).unsqueeze(2)
+                single_sequence = True
+            elif x.dim() == 2:
+                x = x.unsqueeze(2)
+                single_sequence = False
+            else:
+                single_sequence = False
+            
+            batch_size = x.shape[0]
+            
+            # Initialize sequence with input
+            sequence = x.clone()
+            predictions = []
+            
+            for step in range(steps):
+                seq_len = sequence.shape[1]
+                
+                # Step 1: Compute AR(p) prediction for next timestep
+                ar_pred = self.ar_bias.expand(batch_size, 1)
+                for i in range(self.ar_order):
+                    lag_idx = seq_len - 1 - i
+                    if lag_idx >= 0:
+                        ar_pred += self.ar_weights[i] * sequence[:, lag_idx, :]
+                
+                # Step 2: Compute residuals for TCN
+                # Get recent AR predictions and compute residuals
+                if seq_len > self.ar_order:
+                    recent_ar = torch.zeros(batch_size, seq_len - self.ar_order, 1, device=x.device)
+                    for i in range(self.ar_order):
+                        recent_ar += self.ar_weights[i] * sequence[:, self.ar_order-1-i:seq_len-1-i, :]
+                    recent_ar += self.ar_bias
+                    
+                    recent_targets = sequence[:, self.ar_order:, :]
+                    residuals = recent_targets - recent_ar
+                else:
+                    # Not enough history for residuals
+                    residuals = torch.zeros(batch_size, 0, 1, device=x.device)
+                
+                # Step 3: TCN prediction on residuals
+                if residuals.shape[1] > 0:
+                    residuals_transposed = residuals.transpose(1, 2)
+                    tcn_output = self.tcn(residuals_transposed)
+                    tcn_pred = tcn_output[:, :, -1:].transpose(1, 2)
+                else:
+                    tcn_pred = torch.zeros(batch_size, 1, 1, device=x.device)
+                
+                # Step 4: Additive combination
+                next_pred = ar_pred + tcn_pred
+                predictions.append(next_pred)
+                
+                # Append prediction to sequence for next iteration
+                # next_pred is already (batch_size, 1, 1), so just concatenate directly
+                sequence = torch.cat([sequence, next_pred], dim=1)
+            
+            # Stack predictions
+            predictions = torch.cat(predictions, dim=1)
+            
+            if single_sequence:
+                return predictions.squeeze()
+            else:
+                return predictions.squeeze(2)
 
 #Flexible AR and TCN Multiplicative Hybrid Model
 class MultiplicativeHybrid_AR_TCN(nn.Module):
