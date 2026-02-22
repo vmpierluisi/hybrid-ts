@@ -155,7 +155,7 @@ class Classic_TCN(TimeSeriesModel):
         return preds_aligned, targets_aligned
 
 
-class AdditiveHybrid_AR_TCN(TimeSeriesModel):
+class AdditiveHybrid_ARMA_TCN(TimeSeriesModel):
     """
     Additive Hybrid Model: y_t = L_t + N_t (following Wang et al. 2013)
     
@@ -164,11 +164,14 @@ class AdditiveHybrid_AR_TCN(TimeSeriesModel):
     3. TCN models nonlinear pattern: N_hat_t = TCN(e_{t-k:t-1})
     4. Final prediction: y_hat_t = L_hat_t + N_hat_t
     """
-    def __init__(self, ar_order=1, num_channels=[64, 64, 64], kernel_size=3, dilations=None, dropout=0.1):
+    def __init__(self, ar_order=1, ma_order=0, num_channels=[64, 64, 64], kernel_size=3, dilations=None, dropout=0.1):
         super().__init__()
         self.ar_order = ar_order
+        self.ma_order = ma_order
         self.ar_weights = nn.Parameter(torch.zeros(ar_order))
         self.ar_bias = nn.Parameter(torch.zeros(1))
+        if ma_order > 0:
+            self.ma_weights = nn.Parameter(torch.zeros(ma_order))
         
         self.tcn = TemporalConvNet(1, num_channels, kernel_sizes=kernel_size, dilations=dilations, dropout=dropout)
         self.tcn_head = nn.Conv1d(num_channels[-1], 1, kernel_size=1)
@@ -181,6 +184,14 @@ class AdditiveHybrid_AR_TCN(TimeSeriesModel):
         ar_preds += self.ar_bias
         return ar_preds
 
+    def _compute_ma(self, residuals):
+        """Add weighted past residuals to MA predictions"""
+        batch_size, seq_len, _ = residuals.shape
+        ma_correction = torch.zeros(batch_size, seq_len, 1, device=residuals.device)
+        for i in range(min(self.ma_order, seq_len)):
+            ma_correction[:, i:, :] += self.ma_weights[i] * residuals[:, :seq_len - i, :]  # ADD
+        return ma_correction
+
     def forward(self, x):
         x = self._prepare_input(x)
         if x.shape[1] <= self.ar_order:
@@ -189,10 +200,17 @@ class AdditiveHybrid_AR_TCN(TimeSeriesModel):
 
         # 1. AR predictions
         ar_predictions = self._compute_ar(x)
-        
+
         # 2. Residuals
         targets = x[:, self.ar_order:, :]
         residuals = targets - ar_predictions
+
+        if self.ma_order > 0:
+            ma_correction = self._compute_ma(residuals[:, :-1, :])
+            arma_predictions = ar_predictions[:, 1:, :] + ma_correction  # ADD
+        else:  # ADD
+            arma_predictions = ar_predictions[:, 1:, :]
+
         
         # 3. TCN on residuals (causally shifted)
         res_input = residuals[:, :-1, :].transpose(1, 2)
@@ -203,17 +221,16 @@ class AdditiveHybrid_AR_TCN(TimeSeriesModel):
             tcn_preds = torch.zeros(x.shape[0], 0, 1, device=x.device)
 
         # Align lengths
-        ar_aligned = ar_predictions[:, 1:, :] 
         targets_aligned = targets[:, 1:, :]
         
         # We need to handle the case where tcn_preds might be shorter if padding wasn't sufficient
         # (Though TemporalConvNet with ChausalConv1d handles this)
-        final_preds = ar_aligned + tcn_preds
+        final_preds = arma_predictions + tcn_preds
         
         return final_preds, targets_aligned
 
 
-class MultiplicativeHybrid_AR_TCN(TimeSeriesModel):
+class MultiplicativeHybrid_ARMA_TCN(TimeSeriesModel):
     """
     Multiplicative Hybrid Model: y_t = L_t × N_t (following Wang et al. 2013)
 
@@ -222,12 +239,14 @@ class MultiplicativeHybrid_AR_TCN(TimeSeriesModel):
     3. TCN models nonlinear pattern: N_hat_t = TCN(e_{t-k:t-1})
     4. Final prediction: y_hat_t = L_hat_t × N_hat_t
     """
-    def __init__(self, ar_order=1, num_channels=[64, 64, 64], kernel_size=3, dilations=None, dropout=0.1, epsilon=1e-6):
+    def __init__(self, ar_order=1, ma_order=0, num_channels=[64, 64, 64], kernel_size=3, dilations=None, dropout=0.1, epsilon=1e-6):
         super().__init__()
         self.ar_order = ar_order
         self.epsilon = epsilon
         self.ar_weights = nn.Parameter(torch.zeros(ar_order))
         self.ar_bias = nn.Parameter(torch.zeros(1))
+        if ma_order > 0:
+            self.ma_weights = nn.Parameter(torch.zeros(ma_order))
         
         self.tcn = TemporalConvNet(1, num_channels, kernel_sizes=kernel_size, dilations=dilations, dropout=dropout)
         self.tcn_head = nn.Conv1d(num_channels[-1], 1, kernel_size=1)
@@ -240,6 +259,14 @@ class MultiplicativeHybrid_AR_TCN(TimeSeriesModel):
             ar_preds += self.ar_weights[i] * x[:, self.ar_order-1-i:seq_len-1-i, :]
         ar_preds += self.ar_bias
         return ar_preds
+
+    def _compute_ma(self, residuals):
+        """Add weighted past residuals to MA predictions"""
+        batch_size, seq_len, _ = residuals.shape
+        ma_correction = torch.zeros(batch_size, seq_len, 1, device=residuals.device)
+        for i in range(min(self.ma_order, seq_len)):
+            ma_correction[:, i:, :] += self.ma_weights[i] * residuals[:, :seq_len - i, :]  # ADD
+        return ma_correction
 
     def forward(self, x):
         x = self._prepare_input(x)
@@ -258,6 +285,13 @@ class MultiplicativeHybrid_AR_TCN(TimeSeriesModel):
         )
         multi_residuals = targets / safe_ar
 
+            # Apply MA multiplier
+        if self.ma_order > 0:
+            ma_mult = self._compute_ma_multiplier(multi_residuals[:, :-1, :])
+            arma_predictions = ar_predictions[:, 1:, :] + ma_mult
+        else:
+            arma_predictions = ar_predictions[:, 1:, :]
+
         # 3. TCN on residuals
         res_input = multi_residuals[:, :-1, :].transpose(1, 2)
         if res_input.shape[2] > 0:
@@ -267,8 +301,7 @@ class MultiplicativeHybrid_AR_TCN(TimeSeriesModel):
             tcn_preds = torch.ones(x.shape[0], 0, 1, device=x.device)
 
         # Align
-        ar_aligned = ar_predictions[:, 1:, :]
         targets_aligned = targets[:, 1:, :]
         
-        final_preds = ar_aligned * tcn_preds
+        final_preds = arma_predictions * tcn_preds
         return final_preds, targets_aligned
