@@ -33,6 +33,7 @@ class Trainer:
             self,
             model_type='classic',
             ar_order=1,
+            ma_order=0,
             kernel_size=3,
             num_channels=None,
             dilations=None,
@@ -45,6 +46,7 @@ class Trainer:
         Args:
             model_type: 'classic', 'additive', or 'multiplicative'
             ar_order: AR order for hybrid models (ignored for classic)
+            ma_order: MA order for hybrid models (ignored for classic)
             kernel_size: TCN kernel size
             num_channels: List of channel sizes per layer
             dilations: Dilation factors (if None, uses exponential)
@@ -55,6 +57,7 @@ class Trainer:
         """
         self.model_type = model_type.lower()
         self.ar_order = ar_order
+        self.ma_order = ma_order
         self.kernel_size = kernel_size
         self.num_channels = num_channels or ([64] * 5 if model_type == 'classic' else [64] * 3)
         self.dilations = dilations
@@ -88,6 +91,7 @@ class Trainer:
         elif self.model_type == 'additive':
             self.model = AdditiveHybrid_ARMA_TCN(
                 ar_order=self.ar_order,
+                ma_order=self.ma_order,
                 kernel_size=self.kernel_size,
                 num_channels=self.num_channels,
                 dilations=self.dilations
@@ -95,6 +99,7 @@ class Trainer:
         elif self.model_type == 'multiplicative':
             self.model = MultiplicativeHybrid_ARMA_TCN(
                 ar_order=self.ar_order,
+                ma_order=self.ma_order,
                 kernel_size=self.kernel_size,
                 num_channels=self.num_channels,
                 dilations=self.dilations
@@ -109,6 +114,8 @@ class Trainer:
         if self.model_type == 'classic':
             return 'Classic TCN'
         elif self.model_type == 'additive':
+            if self.ma_order > 0:
+                return f'Additive Hybrid ARMA({self.ar_order},{self.ma_order}) + TCN'
             return f'Additive Hybrid AR({self.ar_order}) + TCN'
         else:
             return f'Multiplicative Hybrid AR({self.ar_order}) + TCN'

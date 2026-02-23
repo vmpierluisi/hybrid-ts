@@ -242,6 +242,7 @@ class MultiplicativeHybrid_ARMA_TCN(TimeSeriesModel):
     def __init__(self, ar_order=1, ma_order=0, num_channels=[64, 64, 64], kernel_size=3, dilations=None, dropout=0.1, epsilon=1e-6):
         super().__init__()
         self.ar_order = ar_order
+        self.ma_order = ma_order
         self.epsilon = epsilon
         self.ar_weights = nn.Parameter(torch.zeros(ar_order))
         self.ar_bias = nn.Parameter(torch.zeros(1))
@@ -287,7 +288,7 @@ class MultiplicativeHybrid_ARMA_TCN(TimeSeriesModel):
 
             # Apply MA multiplier
         if self.ma_order > 0:
-            ma_mult = self._compute_ma_multiplier(multi_residuals[:, :-1, :])
+            ma_mult = self._compute_ma(multi_residuals[:, :-1, :])
             arma_predictions = ar_predictions[:, 1:, :] + ma_mult
         else:
             arma_predictions = ar_predictions[:, 1:, :]
