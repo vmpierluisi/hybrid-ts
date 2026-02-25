@@ -95,3 +95,8 @@ uv sync
 - Bai, S., Kolter, J. Z., & Koltun, V. (2018). An empirical evaluation of generic convolutional and recurrent networks for sequence modeling. *arXiv:1803.01271*.
 - Suleiman, M., Muhammad, I., Adamu, A. Z., Yahaya, Z., Rufai, I., Muhammad, A., Adamu, I., & Abdu, M. (2023). Modelling Nigeria crude oil prices using ARIMA time series models. *NIPES Journal of Science and Technology Research*, 5(1), 230–241.
 - Moshiri, S., & Foroutan, F. (2006). Forecasting nonlinear crude oil futures prices. *The Energy Journal*, 27(4), 81–95.
+
+---
+
+## License
+This project is licensed under CC BY-NC 4.0. Free to use for non-commercial purposes. For commercial licensing inquiries, contact me at vmpierluisi@email.com.
