@@ -169,6 +169,7 @@ class AdditiveHybrid_ARMA_TCN(TimeSeriesModel):
         self.ar_order = ar_order
         self.ma_order = ma_order
         self.ar_weights = nn.Parameter(torch.zeros(ar_order))
+        self.ar_weights.data[0] = 1
         self.ar_bias = nn.Parameter(torch.zeros(1))
         if ma_order > 0:
             self.ma_weights = nn.Parameter(torch.zeros(ma_order))
@@ -189,7 +190,7 @@ class AdditiveHybrid_ARMA_TCN(TimeSeriesModel):
         batch_size, seq_len, _ = residuals.shape
         ma_correction = torch.zeros(batch_size, seq_len, 1, device=residuals.device)
         for i in range(min(self.ma_order, seq_len)):
-            ma_correction[:, i:, :] += self.ma_weights[i] * residuals[:, :seq_len - i, :]  # ADD
+            ma_correction[:, i+1:, :] += self.ma_weights[i] * residuals[:, :seq_len-i-1, :]
         return ma_correction
 
     def forward(self, x):
@@ -206,10 +207,10 @@ class AdditiveHybrid_ARMA_TCN(TimeSeriesModel):
         residuals = targets - ar_predictions
 
         if self.ma_order > 0:
-            ma_correction = self._compute_ma(residuals[:, :-1, :])
-            arma_predictions = ar_predictions[:, 1:, :] + ma_correction  # ADD
-        else:  # ADD
-            arma_predictions = ar_predictions[:, 1:, :]
+            ma_correction = self._compute_ma(residuals)
+            arma_predictions = ar_predictions + ma_correction
+        else:
+            arma_predictions = ar_predictions
 
         
         # 3. TCN on residuals (causally shifted)
@@ -217,17 +218,15 @@ class AdditiveHybrid_ARMA_TCN(TimeSeriesModel):
         if res_input.shape[2] > 0:
             tcn_out = self.tcn(res_input)
             tcn_preds = self.tcn_head(tcn_out).transpose(1, 2)
+            zero_pad = torch.zeros(x.shape[0], 1, 1, device=x.device)
+            tcn_preds = torch.cat([zero_pad, tcn_preds], dim=1)
         else:
-            tcn_preds = torch.zeros(x.shape[0], 0, 1, device=x.device)
+            tcn_preds = torch.zeros(x.shape[0], ar_predictions.shape[1], 1, device=x.device)
 
-        # Align lengths
-        targets_aligned = targets[:, 1:, :]
-        
-        # We need to handle the case where tcn_preds might be shorter if padding wasn't sufficient
-        # (Though TemporalConvNet with ChausalConv1d handles this)
+        #targets_aligned = targets
         final_preds = arma_predictions + tcn_preds
-        
-        return final_preds, targets_aligned
+
+        return final_preds, targets
 
 
 class MultiplicativeHybrid_ARMA_TCN(TimeSeriesModel):
@@ -245,6 +244,7 @@ class MultiplicativeHybrid_ARMA_TCN(TimeSeriesModel):
         self.ma_order = ma_order
         self.epsilon = epsilon
         self.ar_weights = nn.Parameter(torch.zeros(ar_order))
+        self.ar_weights.data[0] = 1
         self.ar_bias = nn.Parameter(torch.zeros(1))
         if ma_order > 0:
             self.ma_weights = nn.Parameter(torch.zeros(ma_order))
@@ -266,7 +266,7 @@ class MultiplicativeHybrid_ARMA_TCN(TimeSeriesModel):
         batch_size, seq_len, _ = residuals.shape
         ma_correction = torch.zeros(batch_size, seq_len, 1, device=residuals.device)
         for i in range(min(self.ma_order, seq_len)):
-            ma_correction[:, i:, :] += self.ma_weights[i] * residuals[:, :seq_len - i, :]  # ADD
+            ma_correction[:, i+1:, :] += self.ma_weights[i] * residuals[:, :seq_len-i-1, :]  # ADD
         return ma_correction
 
     def forward(self, x):
@@ -288,21 +288,22 @@ class MultiplicativeHybrid_ARMA_TCN(TimeSeriesModel):
 
             # Apply MA multiplier
         if self.ma_order > 0:
-            ma_mult = self._compute_ma(multi_residuals[:, :-1, :])
-            arma_predictions = ar_predictions[:, 1:, :] + ma_mult
+            ma_mult = self._compute_ma(multi_residuals)
+            arma_predictions = ar_predictions + ma_mult
         else:
-            arma_predictions = ar_predictions[:, 1:, :]
+            arma_predictions = ar_predictions
 
         # 3. TCN on residuals
         res_input = multi_residuals[:, :-1, :].transpose(1, 2)
         if res_input.shape[2] > 0:
             tcn_out = self.tcn(res_input)
             tcn_preds = self.tcn_head(tcn_out).transpose(1, 2) + self.tcn_bias
+            zero_pad = torch.ones(x.shape[0], 1, 1, device=x.device)  # multiplicative identity
+            tcn_preds = torch.cat([zero_pad, tcn_preds], dim=1)
         else:
-            tcn_preds = torch.ones(x.shape[0], 0, 1, device=x.device)
+            tcn_preds = torch.ones(x.shape[0], ar_predictions.shape[1], 1, device=x.device)
 
-        # Align
-        targets_aligned = targets[:, 1:, :]
-        
+        #targets_aligned = targets
         final_preds = arma_predictions * tcn_preds
-        return final_preds, targets_aligned
+
+        return final_preds, targets

@@ -39,6 +39,7 @@ class Trainer:
             dilations=None,
             num_epochs=100,
             lr=0.001,
+            patience=None,
             seed=42,
             verbose=True
     ):
@@ -63,8 +64,17 @@ class Trainer:
         self.dilations = dilations
         self.num_epochs = num_epochs
         self.lr = lr
+        self.patience = patience
         self.seed = seed
         self.verbose = verbose
+        self.device = torch.device(
+            'cuda' if torch.cuda.is_available()
+             else 'mps' if torch.backends.mps.is_available()
+             else 'cpu'
+            )
+
+        if self.verbose:
+            print(f"Using device: {self.device}")
 
         self.model = None
         self.optimizer = None
@@ -131,10 +141,14 @@ class Trainer:
             self: Trained trainer instance
         """
         self._set_seed()
-        y_train = _ensure_tensor(y_train)
+        y_train = _ensure_tensor(y_train).to(self.device)
         self._initialize_model()
+        self.model = self.model.to(self.device)
 
         model_name = self._get_model_name()
+
+        best_loss = float('inf')
+        patience_counter = 0
 
         for epoch in range(self.num_epochs):
             self.optimizer.zero_grad()
@@ -149,6 +163,18 @@ class Trainer:
             # Logging
             if self.verbose and (epoch + 1) % 10 == 0:
                 print(f'{model_name} - Epoch [{epoch + 1}/{self.num_epochs}], Loss: {loss.item():.6f}')
+
+            if self.patience is not None:
+                if loss.item() < best_loss - 1e-6:
+                    best_loss = loss.item()
+                    patience_counter = 0
+                else:
+                    patience_counter += 1
+
+                if patience_counter >= self.patience:
+                    if self.verbose:
+                        print(f'Early stopping after {patience_counter} epochs')
+                    break
 
         return self
 
@@ -315,7 +341,7 @@ class CrossValidator:
             current_loss = loss.item()
             if current_loss < best_loss - 1e-6:
                 best_loss = current_loss
-                patience = 0
+                patience_counter = 0
             else:
                 patience_counter += 1
             final_loss = current_loss
@@ -558,10 +584,10 @@ class DartsBridge:
     def predict(self, X):
         # Darts sends X as a 2D numpy array (samples, lags)
         # We convert to Torch, predict 1-step, and return numpy
-        x_tensor = torch.from_numpy(X).float()
+        x_tensor = torch.from_numpy(X).float().to(next(self.torch_model.parameters()).device)
         self.torch_model.eval()
         with torch.no_grad():
             # Using your model's existing .predict() method
             # We predict 1 step because Darts handles the recursion for us
             preds = self.torch_model.predict(x_tensor, steps=1)
-        return preds.numpy().reshape(-1, 1)
+        return preds.cpu().numpy().reshape(-1, 1)
