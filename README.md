@@ -81,8 +81,8 @@ ml-project/
 This project uses [uv](https://github.com/astral-sh/uv) for dependency management.
 
 ```bash
-git clone https://github.com/your-username/ml-project.git
-cd ml-project
+git clone https://github.com/your-username/hybrid-ts.git
+cd hybrid-ts
 uv sync
 ```
 
