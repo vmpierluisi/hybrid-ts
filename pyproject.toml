@@ -23,3 +23,8 @@ dependencies = [
 
 [[tool.uv.index]]
 url = "https://github.com/vmpierluisi/ml-project"
+
+[dependency-groups]
+dev = [
+    "nbstripout>=0.9.1",
+]
