@@ -6,9 +6,9 @@ from itertools import product
 
 import warnings
 import pandas as pd
-from src.models import Classic_TCN
-from src.models import AdditiveHybrid_ARMA_TCN
-from src.models import MultiplicativeHybrid_ARMA_TCN
+from src.models import ClassicTCN
+from src.models import AdditiveHybridARMATCN
+from src.models import MultiplicativeHybridARMATCN
 
 warnings.filterwarnings('ignore')
 
@@ -93,13 +93,13 @@ class Trainer:
     def _initialize_model(self):
         """Initialize model based on type"""
         if self.model_type == 'classic':
-            self.model = Classic_TCN(
+            self.model = ClassicTCN(
                 num_channels=self.num_channels,
                 kernel_size=self.kernel_size,
                 dilations=self.dilations
             )
         elif self.model_type == 'additive':
-            self.model = AdditiveHybrid_ARMA_TCN(
+            self.model = AdditiveHybridARMATCN(
                 ar_order=self.ar_order,
                 ma_order=self.ma_order,
                 kernel_size=self.kernel_size,
@@ -107,7 +107,7 @@ class Trainer:
                 dilations=self.dilations
             )
         elif self.model_type == 'multiplicative':
-            self.model = MultiplicativeHybrid_ARMA_TCN(
+            self.model = MultiplicativeHybridARMATCN(
                 ar_order=self.ar_order,
                 ma_order=self.ma_order,
                 kernel_size=self.kernel_size,
@@ -155,6 +155,10 @@ class Trainer:
             predictions, targets = self.model(y_train)
             loss = self.criterion(predictions, targets)
             loss.backward()
+            # Gradient clipping for multiplicative model to prevent explosion
+            # through the product rule in the backward pass
+            if self.model_type == 'multiplicative':
+                nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
             self.optimizer.step()
 
             # Track history
@@ -273,7 +277,7 @@ class CrossValidator:
         dropout = config.get('dropout', 0.1)
 
         if self.model_type == 'classic':
-            return Classic_TCN(
+            return ClassicTCN(
                 kernel_size=config['kernel_size'],
                 num_channels=num_channels,
                 dropout=dropout
@@ -288,7 +292,7 @@ class CrossValidator:
             # Add MA order if specified
             if ma_order is not None and ma_order > 0:
                 model_kwargs['ma_order'] = ma_order
-            return AdditiveHybrid_ARMA_TCN(**model_kwargs)
+            return AdditiveHybridARMATCN(**model_kwargs)
 
         elif self.model_type == 'multiplicative':
             model_kwargs = {
@@ -300,7 +304,7 @@ class CrossValidator:
             # Add MA order if specified
             if ma_order is not None and ma_order > 0:
                 model_kwargs['ma_order'] = ma_order
-            return MultiplicativeHybrid_ARMA_TCN(**model_kwargs)
+            return MultiplicativeHybridARMATCN(**model_kwargs)
         else:
             raise ValueError(f"Unknown model_type: {self.model_type}")
 
@@ -336,6 +340,8 @@ class CrossValidator:
             predictions, targets = model(train_tensor)
             loss = criterion(predictions, targets)
             loss.backward()
+            if self.model_type == 'multiplicative':
+                nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
 
             current_loss = loss.item()

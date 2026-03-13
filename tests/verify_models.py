@@ -5,14 +5,14 @@ import os
 # Add src to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.models import Classic_TCN
+from src.models import ClassicTCN
 
 def test_flexible_tcn():
     print("Testing Flexible TCN (per-layer config)...")
     # 2 layers: 
     # Layer 1: kernel 2, dilation 1
     # Layer 2: kernel 3, dilation 2
-    model = Classic_TCN(
+    model = ClassicTCN(
         num_inputs=1, 
         num_channels=[64, 64], 
         kernel_size=[2, 3], 

@@ -124,7 +124,7 @@ class TimeSeriesModel(nn.Module):
             return predictions.squeeze(2) if batch_size > 1 else predictions.squeeze()
 
 
-class Classic_TCN(TimeSeriesModel):
+class ClassicTCN(TimeSeriesModel):
     """
     Standard TCN for direct time series forecasting.
     Follows the architecture by Bai et al. (2018).
@@ -155,7 +155,7 @@ class Classic_TCN(TimeSeriesModel):
         return preds_aligned, targets_aligned
 
 
-class AdditiveHybrid_ARMA_TCN(TimeSeriesModel):
+class AdditiveHybridARMATCN(TimeSeriesModel):
     """
     Additive Hybrid Model: y_t = L_t + N_t (following Wang et al. 2013)
     
@@ -229,7 +229,7 @@ class AdditiveHybrid_ARMA_TCN(TimeSeriesModel):
         return final_preds, targets
 
 
-class MultiplicativeHybrid_ARMA_TCN(TimeSeriesModel):
+class MultiplicativeHybridARMATCN(TimeSeriesModel):
     """
     Multiplicative Hybrid Model: y_t = L_t × N_t (following Wang et al. 2013)
 
@@ -238,7 +238,7 @@ class MultiplicativeHybrid_ARMA_TCN(TimeSeriesModel):
     3. TCN models nonlinear pattern: N_hat_t = TCN(e_{t-k:t-1})
     4. Final prediction: y_hat_t = L_hat_t × N_hat_t
     """
-    def __init__(self, ar_order=1, ma_order=0, num_channels=[64, 64, 64], kernel_size=3, dilations=None, dropout=0.1, epsilon=1e-6):
+    def __init__(self, ar_order=1, ma_order=0, num_channels=[64, 64, 64], kernel_size=3, dilations=None, dropout=0.1, epsilon=1e-2):
         super().__init__()
         self.ar_order = ar_order
         self.ma_order = ma_order
@@ -279,12 +279,18 @@ class MultiplicativeHybrid_ARMA_TCN(TimeSeriesModel):
         targets = x[:, self.ar_order:, :]
 
         # 2. Multiplicative residuals
+        # Fix: clamp magnitude to epsilon, preserving sign; default to +epsilon when prediction is zero
+        # (the old torch.where formula produced 0 for negative near-zero values: sign(-x)*eps + eps = 0)
+        sign_ar = torch.where(ar_predictions >= 0,
+                              torch.ones_like(ar_predictions),
+                              -torch.ones_like(ar_predictions))
         safe_ar = torch.where(
             torch.abs(ar_predictions) < self.epsilon,
-            torch.sign(ar_predictions) * self.epsilon + self.epsilon,
+            sign_ar * self.epsilon,
             ar_predictions
         )
-        multi_residuals = targets / safe_ar
+        # Fix 3: clamp ratios to a stable range before feeding into the TCN
+        multi_residuals = torch.clamp(targets / safe_ar, min=-10.0, max=10.0)
 
             # Apply MA multiplier
         if self.ma_order > 0:
