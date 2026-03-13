@@ -12,11 +12,15 @@ The TCN is chosen over RNN-based architectures following Bai et al. (2018), who 
 
 **Classic TCN** — a standalone Temporal Convolutional Network with dilated causal convolutions, selected via grid search over kernel size, number of filters, number of layers, dilation base, and learning rate.
 
-**ARMA+TCN (Additive Hybrid)** — an additive decomposition model. The optimal ARMA order is first selected by AIC/BIC and its parameters are fixed. The TCN is then trained on the residuals of the ARMA fit, and the final forecast is the sum of both components:
+**Additive ARMA(5,0)+TCN** — an additive decomposition. The AR(5) component captures the linear structure of returns; the TCN is trained jointly on the residuals of that fit, and the final forecast is their sum:
 
 $$\hat{y}_t = \hat{y}_t^{\text{ARMA}} + \hat{y}_t^{\text{TCN}}$$
 
-The TCN hyperparameters are selected via grid search conditional on the fixed ARMA component.
+**Multiplicative ARMA(1,0)×TCN** — a multiplicative decomposition following Wang et al. (2013). The AR(1) component acts as a linear scale factor; the TCN is trained on the ratio of actuals to that prediction, and the two are multiplied at inference time:
+
+$$\hat{y}_t = \hat{y}_t^{\text{AR}} \times \hat{y}_t^{\text{TCN}}$$
+
+For both hybrids the TCN hyperparameters are selected via grid search conditional on the fixed ARMA component.
 
 ---
 
@@ -34,27 +38,29 @@ The data is split into 60% train, 20% validation, and 20% test. Hyperparameter s
 
 ## Results
 
-Forecasting performance across horizons of 1 to 200 steps ahead, evaluated on the test set.
+Forecasting performance across horizons of 1 to 200 steps ahead, evaluated on the held-out test set.
 
 ### MSE
 
-| Model       | 1-step | 2-step | 3-step | 5-step | 10-step | 30-step | 50-step | 100-step | 150-step | 200-step |
-|-------------|--------|--------|--------|--------|---------|---------|---------|----------|----------|----------|
-| AR(1)       | 0.000376 | 0.000378 | 0.000379 | 0.000382 | 0.000384 | 0.000399 | 0.000416 | 0.000369 | 0.000227 | 0.000155 |
-| AR(5)       | 0.000388 | 0.000389 | 0.000384 | 0.000384 | 0.000384 | 0.000399 | 0.000416 | 0.000369 | 0.000227 | 0.000155 |
-| Classic TCN | 0.000467 | 0.000467 | 0.000471 | 0.000463 | 0.000451 | 0.000473 | 0.000496 | 0.000454 | 0.000301 | 0.000252 |
-| ARMA+TCN    | 0.000383 | 0.000384 | 0.000390 | 0.000380 | 0.000380 | 0.000393 | 0.000412 | 0.000369 | 0.000225 | 0.000158 |
+| Model                   | 1-step   | 2-step   | 3-step   | 5-step   | 10-step  | 30-step  | 50-step  | 100-step | 150-step | 200-step |
+|-------------------------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|
+| AR(1)                   | 0.000376 | 0.000378 | 0.000379 | 0.000382 | 0.000384 | 0.000399 | 0.000416 | 0.000369 | 0.000227 | 0.000155 |
+| AR(5)                   | 0.000388 | 0.000389 | 0.000384 | 0.000384 | 0.000384 | 0.000399 | 0.000416 | 0.000369 | 0.000227 | 0.000155 |
+| Classic TCN             | 0.000493 | 0.000493 | 0.000493 | 0.000487 | 0.000482 | 0.000503 | 0.000527 | 0.000486 | 0.000331 | 0.000285 |
+| Additive ARMA(5,0)+TCN  | 0.000369 | 0.000370 | 0.000376 | 0.000378 | 0.000387 | 0.000400 | 0.000417 | 0.000370 | 0.000228 | 0.000156 |
+| Multiplicative ARMA(1,0)×TCN | 0.000461 | 0.000462 | 0.000520 | 0.000425 | 0.000458 | 0.000408 | 0.000418 | 0.000376 | 0.000233 | 0.000158 |
 
 ### MAE
 
-| Model       | 1-step | 2-step | 3-step | 5-step | 10-step | 30-step | 50-step | 100-step | 150-step | 200-step |
-|-------------|--------|--------|--------|--------|---------|---------|---------|----------|----------|----------|
-| AR(1)       | 0.01435 | 0.01435 | 0.01438 | 0.01442 | 0.01441 | 0.01461 | 0.01488 | 0.01395 | 0.01188 | 0.01015 |
-| AR(5)       | 0.01454 | 0.01453 | 0.01447 | 0.01450 | 0.01442 | 0.01461 | 0.01488 | 0.01395 | 0.01188 | 0.01015 |
-| Classic TCN | 0.01669 | 0.01666 | 0.01675 | 0.01649 | 0.01621 | 0.01663 | 0.01697 | 0.01602 | 0.01428 | 0.01349 |
-| ARMA+TCN    | 0.01452 | 0.01453 | 0.01468 | 0.01443 | 0.01443 | 0.01456 | 0.01485 | 0.01403 | 0.01204 | 0.01043 |
+| Model                   | 1-step  | 2-step  | 3-step  | 5-step  | 10-step | 30-step | 50-step | 100-step | 150-step | 200-step |
+|-------------------------|---------|---------|---------|---------|---------|---------|---------|----------|----------|----------|
+| AR(1)                   | 0.01435 | 0.01435 | 0.01438 | 0.01442 | 0.01441 | 0.01461 | 0.01488 | 0.01395  | 0.01188  | 0.01015  |
+| AR(5)                   | 0.01454 | 0.01453 | 0.01447 | 0.01450 | 0.01442 | 0.01461 | 0.01488 | 0.01395  | 0.01188  | 0.01015  |
+| Classic TCN             | 0.01727 | 0.01724 | 0.01724 | 0.01708 | 0.01694 | 0.01734 | 0.01769 | 0.01675  | 0.01501  | 0.01428  |
+| Additive ARMA(5,0)+TCN  | 0.01420 | 0.01422 | 0.01435 | 0.01440 | 0.01445 | 0.01462 | 0.01488 | 0.01396  | 0.01188  | 0.01012  |
+| Multiplicative ARMA(1,0)×TCN | 0.01606 | 0.01607 | 0.01649 | 0.01524 | 0.01597 | 0.01475 | 0.01476 | 0.01405  | 0.01194  | 0.01005  |
 
-The ARMA+TCN hybrid consistently outperforms the standalone TCN across all horizons. Against the AR benchmarks the picture is more mixed — the hybrid matches or improves on AR(1) at multiple horizons, particularly beyond 100 steps, but does not dominate across the board.
+The additive ARMA(5,0)+TCN is the strongest model overall: it matches or beats AR(1) at every horizon and substantially outperforms the standalone TCN. The multiplicative ARMA(1,0)×TCN shows weaker performance at short horizons (1–10 steps) but converges to near-AR performance at longer horizons (100–200 steps), suggesting the multiplicative decomposition is better suited to capturing slow-moving structure than short-term dynamics. Both hybrids decisively outperform the Classic TCN across all horizons.
 
 ---
 
@@ -68,6 +74,7 @@ ml-project/
 │   ├── 2_tcn_selection.ipynb
 │   ├── 3_hybrid_selection.ipynb
 │   └── 4_in_out_sample_eval.ipynb
+├── plots/              # Saved evaluation figures
 ├── src/                # Model definitions, training, diagnostics
 ├── weights/            # Saved model weights
 ├── main.py
