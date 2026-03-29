@@ -106,4 +106,4 @@ uv sync
 ---
 
 ## License
-This project is licensed under CC BY-NC 4.0. Free to use for non-commercial purposes. For commercial licensing inquiries, contact me at vmpierluisi@email.com.
+This project is licensed under CC BY-NC 4.0. Free to use for non-commercial purposes. For commercial licensing inquiries, contact me at vmpierluisi@gmail.com.
